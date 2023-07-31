@@ -1,0 +1,7 @@
+functions-framework==3.*
+google-cloud-storage
+jwcrypto
+google-cloud-logging
+google-cloud-core
+google-crc32c
+google-cloud-secret-manager

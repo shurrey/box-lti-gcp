@@ -1,0 +1,11 @@
+functions-framework==3.*
+google-cloud-storage
+boxsdk
+boxsdk[jwt]
+pyJWT
+urllib3
+redis
+google-cloud-logging
+google-cloud-bigtable
+google-cloud-core
+firebase-admin

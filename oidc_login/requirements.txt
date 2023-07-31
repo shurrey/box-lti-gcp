@@ -1,0 +1,5 @@
+functions-framework==3.*
+google-cloud-logging
+google-cloud-bigtable
+google-cloud-core
+firebase-admin
