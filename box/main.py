@@ -69,27 +69,37 @@ def box(request):
             course_title = launch_params['https://purl.imsglobal.org/spec/lti/claim/context']['title']
             course_label = launch_params['https://purl.imsglobal.org/spec/lti/claim/context']['label']
             box_course_folder_id = box.create_course_folder(course_title, course_label)
+            box_group_id = box.create_course_group(course_title, course_label)
 
-            course = db.create_course(launch_params, box_course_folder_id)
+            box.create_collaborations(box_group_id, box_course_folder_id)
+
+            course = db.create_course(launch_params, box_course_folder_id, box_group_id)
         else:
             return "Course not found, please contact the course instructor.", 404
     
-    if isInstructor:
-        lti = lti_util.lti_util(logger, client_id, config['auth_token_url'], course['nrps_url'])
+    if isInstructor: 
+        if course['membership_count'] == 0:
+            lti = lti_util.lti_util(logger, client_id, config['auth_token_url'], course['nrps_url'])
 
-        access_token = db.get_token()
-
-        if access_token is None:
-        
-            access_token = lti.get_lti_token()
+            access_token = db.get_token()
 
             if access_token is None:
-                return ("Error getting access token", 401)
-            else:
-                db.cache_token(access_token)
+            
+                access_token = lti.get_lti_token()
 
-        nprs_data = lti.get_nrps_data(access_token["access_token"])
+                if access_token is None:
+                    return ("Error getting access token", 401)
+                else:
+                    db.cache_token(access_token)
 
-        db.save_class_list(lms_course_id, nprs_data['members'])
+            nprs_data = lti.get_nrps_data(access_token["access_token"])
+
+            db.save_class_list(lms_course_id, nprs_data)
+    else:
+        membership = db.get_membership(lms_course_id, lms_user_id)
+
+        if membership is None or membership['box_collab_id'] == "":
+            collab_id = box.add_user_to_group(course['box_group_id'], user['box_user_id'])
+            db.update_memberships(course['lms_course_id'],user['lms_user_id'],{"box_collab_id" : collab_id})
 
     return (f"user {user}\ncourse {course}")

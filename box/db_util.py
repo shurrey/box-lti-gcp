@@ -5,6 +5,8 @@ from firebase_admin import firestore
 import datetime
 import time
 
+import box_util
+
 class db_util:
 
     def __init__(self, logger):
@@ -17,6 +19,7 @@ class db_util:
         cred = credentials.ApplicationDefault()
         firebase_admin.initialize_app(cred)
         self.db = firestore.client()
+
 
     def set_params(self, client_id, deployment_id):
         self.client_id = client_id
@@ -44,6 +47,10 @@ class db_util:
     def create_document(self, collection, document, cache_value):
         doc_ref = self.db.collection(collection).document(document)
         doc_ref.set(cache_value)
+
+    def update_memberships(self, lms_course_id, lms_user_id, update):
+        doc_ref = self.db.collection("courses").document(f"{self.base_doc}|{lms_course_id}").collection('memberships').document(lms_user_id)
+        doc_ref.update(update)
         
     def delete_document(self,collection,document):
         doc_ref = self.db.collection(collection).document(document)
@@ -112,6 +119,10 @@ class db_util:
 
         cfg_dict = self.get_document('systems', self.base_doc)
         return cfg_dict['box_root_folder']
+    
+    def get_membership_count(self, lms_course_id):
+        coll_ref = self.db.collection('courses').document(self.base_doc + '|' + lms_course_id).collection('memberships')
+        return coll_ref.count().get()
         
     def get_course(self, lms_course_id):
 
@@ -119,14 +130,20 @@ class db_util:
 
         crs_dict = self.get_document('courses', self.base_doc + '|' + lms_course_id)
 
+        self.logger.log_text(f"crs_dict {crs_dict}")
+
         try:
             course["lms_course_id"] = crs_dict['lms_course_id']
             course["box_course_folder_id"] = crs_dict['box_course_folder_id']
+            course["box_group_id"] = crs_dict['box_group_id']
             course['system_id'] = crs_dict['system_id']
             course['nrps_url'] = crs_dict['nrps_url']
             course['groups_url'] = crs_dict['groups_url']
             course['groups_sets_url'] = crs_dict['groups_sets_url']
             course['lineitems_url'] = crs_dict['lineitems_url']
+            if course['lms_course_id']:
+                course['membership_count'] = self.get_membership_count(lms_course_id)
+            
 
             print(f"course {course}")
 
@@ -135,13 +152,14 @@ class db_util:
             self.logger.log_text(f"box->get_user: Error getting course - {e}", severity="ERROR")
             return None
 
-    def create_course(self, launch_params, box_course_folder_id):
+    def create_course(self, launch_params, box_course_folder_id, box_group_id):
 
         lms_course_id = launch_params['https://purl.imsglobal.org/spec/lti/claim/context']['id']
 
         course = {
             "lms_course_id" : lms_course_id,
             "box_course_folder_id" : box_course_folder_id,
+            "box_group_id" : box_group_id,
             "system_id" : launch_params['https://purl.imsglobal.org/spec/lti/claim/tool_platform']['guid'],
             'nrps_url' : launch_params['https://purl.imsglobal.org/spec/lti-nrps/claim/namesroleservice']['context_memberships_url'],
             "groups_url" : launch_params['https://purl.imsglobal.org/spec/lti-gs/claim/groupsservice']['context_groups_url'],
@@ -149,9 +167,22 @@ class db_util:
             "lineitems_url" : launch_params['https://purl.imsglobal.org/spec/lti-ags/claim/endpoint']['lineitems']
         }
         
-        self.create_document('courses', self.base_doc + '|' + course)
+        self.create_document('courses', self.base_doc + '|' + lms_course_id, course)
+
+        course['membership_count'] = 0
 
         return course
+    
+    def get_membership(self, lms_course_id, lms_user_id):
+        doc_ref = self.db.collection('courses').document(f"{self.base_doc}|{lms_course_id}").collection('memberships').document(lms_user_id)
+
+        doc = doc_ref.get()
+        if doc.exists:
+            self.logger.log_text(f"Document data for memberships: {doc.to_dict()}")
+            return doc.to_dict()
+        else:
+            self.logger.log_text(f"No such document for memberships")
+            return None    
     
     def cache_token(self, access_token):
         exp_time = time.time() + int(access_token['expires_in'])
@@ -179,12 +210,14 @@ class db_util:
         document = self.base_doc + '|' + lms_course_id
         subcollection = "memberships"
 
-        for student in class_list:
+        for student in class_list["members"]:
             student_data = {}
 
             subdocument = student['user_id']
 
             student_data['status'] = student['status']
             student_data['roles'] = student['roles']
+            student_data['box_collab_id'] = ""
 
             self.set_subcollection(collection, document, subcollection, subdocument, student_data)
+
